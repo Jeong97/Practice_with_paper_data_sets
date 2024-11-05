@@ -1,0 +1,82 @@
+NOMENCLATURE:
+
+Model A:
+- 7 frequency Points 
+- Constant Temperature & SoC (25C, 50%)
+- Dataset Size: 25 x 14
+- Training Time: 5 seconds
+* ver 1.00 --> Simple
+* ver 1.01 --> K-Fold (5 Fold)
+
+Model B:
+- 7 frequency Points 
+- All Temperature & SoC, but NOT Inputs
+- Dataset Size: 360 x 14
+- Training Time: 4 min
+* ver 2.00 --> Simple
+* ver 2.01 --> K-Fold (5 Fold)
+
+Model C:
+- 7 frequency Points 
+- All Temperature & SoC
+- Dataset Size: 360 x 16
+- Training Time: 5 min
+* ver 3.00 --> Simple
+* ver 3.01 --> K-Fold (5 Fold)
+
+Model D:
+- 61 frequency Points 
+- Constant Temperature & SoC (25C, 50%)
+- Dataset Size: 25 x 122
+- Training Time: 30 seconds
+* ver 4.00 --> Simple
+* ver 4.01 --> K-Fold (5 Fold)
+
+Model E:
+- 61 frequency Points 
+- All Temperature & SoC, but NOT Inputs
+- Dataset Size: 360 x 122
+- Training Time: 45 min
+* ver 5.00 --> Simple
+* ver 5.01 --> K-Fold (5 Fold)
+
+Model F:
+- 61 frequency Points 
+- All Temperature & SoC
+- Dataset Size: 360 x 124 (Can be changed)
+- Training Time: 50 min
+* ver 6.00 --> Simple/Single Run
+* ver 6.01 --> Gaussian Noise Test (Detailed!!)
+* ver 6.02 --> Gaussian Noise Test vs Capacity (Detailed!!)
+* ver 6.10 --> K-Fold (5 Fold)
+* ver 6.20 --> K-Fold (5 Fold), Train/Test dataset segregated by cell Number
+
+______________________________________________________________________________________________________________________________________________
+
+Use Model F ver 6.00 for single run and change frequency points or inputs easily
+Use Model F ver 6.10 for K-Fold run and change frequency points or inputs easily
+Use Model F ver 6.01 for Noisy Input Data
+Use Model F ver 6.20 for getting final results!
+______________________________________________________________________________________________________________________________________________
+
+NOTE:
+
+Before running, change the file location containing the training data
+
+Find under "Reading the Data" Heading;
+WholeDataRealSOH = pd.read_csv("G:\\My Drive\\Faris' Work\\KAIST\\NICE Lab\\SRC Code\\EIS GPR\\Data\\WholeDataRealSOH csv.csv")  --->  Line 2
+- Change the folder path to where ever the "WholeDataRealSOH csv.csv" file is located.
+
+Training the model takes alot of time depending on the parameters.
+Using Single run (v6.00) is faster than K-Fold (v6.20)
+______________________________________________________________________________________________________________________________________________
+
+CHANGING PARAMETERS:
+
+1. Selecting Specific Features:
+	- Under "Selecting specific features" Heading;
+		* Line 134: Select the frequency range
+	- Under "GPR Model Parameters" Heading;
+		* Line 26 & 30: Select the parameters for model input (Need to be same for both train & test data)
+
+
