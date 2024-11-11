@@ -1,0 +1,180 @@
+Toyo_EIS_Data
+  Version: 0.96
+  Experiment Type: LogFreqSweep,ConstantCurrent
+  Date: 2019-01-06
+  Time: 21:27:00
+  Open Circuit Potential (V): 16.5301513671875
+  Begin User Comments: 
+    Comment Lines: 1
+    Data Comment #1: catl 8s2p no3
+  End User Comments: 
+  Begin Experiment: 
+    DC Type: 2
+    DC Level: 0
+    DC Level Type: 0
+    AC: 0.5
+    Sweep Type: 0
+    vs Freq-Initial: 10000
+    vs Freq-Final: 0.01
+    vs Freq-Log Interval: 10
+    vs Time-Freq: 0.1
+    vs Time-Total Time: 1200
+    vs Time-Time Type: 1
+    vs Time-Interval: 0.8
+    Freq List: 32
+    Freq #1: 1000
+    Freq #2: 900
+    Freq #3: 800
+    Freq #4: 700
+    Freq #5: 600
+    Freq #6: 500
+    Freq #7: 400
+    Freq #8: 380
+    Freq #9: 350
+    Freq #10: 320
+    Freq #11: 300
+    Freq #12: 250
+    Freq #13: 200
+    Freq #14: 160
+    Freq #15: 125
+    Freq #16: 100
+    Freq #17: 80
+    Freq #18: 50
+    Freq #19: 40
+    Freq #20: 20
+    Freq #21: 15
+    Freq #22: 10
+    Freq #23: 8
+    Freq #24: 6
+    Freq #25: 5
+    Freq #26: 4
+    Freq #27: 2
+    Freq #28: 1
+    Freq #29: 0.8
+    Freq #30: 0.5
+    Freq #31: 0.2
+    Freq #32: 0.1
+  End Experiment: 
+  Begin Pstat/Gstat: DevPSPBi500Dash50,DevIFunit
+    Freq Correct IsActive: False
+    SafetyMinV: 2.5
+    SafetyMaxV: 50
+    SafetyMinI: -3
+    SafetyMaxI: 6
+    SafetyMinVUse: False
+    SafetyMaxVUse: True
+    SafetyMinIUse: False
+    SafetyMaxIUse: False
+    OutputSelection: 2
+    ACGain: 1
+    CurrentSenceMode: 1
+    VoltSenceRangeMin: 0
+    VoltSenseRangeMax: 100
+    GenOutSwitchStatus: True
+    OffsetCancelGainCurrent: 1
+    OffsetCancelGainVoltage: 10
+  End Pstat/Gstat: DevPSPBi500Dash50,DevIFunit
+  Begin SC unit: DevSCunit
+    OffsetCancel: True
+    OffsetCancelGain: 10
+    ClockMode: 1
+  End SC unit: DevSCunit
+  Begin DA: DevDT_DA9836
+    DA clock: 250000
+    OutVoltRangeMin: -10
+    OutVoltRangeMax: 10
+  End DA: DevDT_DA9836
+  Begin AD: DevDT_AD9836_Ch12
+    Channel No.: 4
+    Channel Name: Cell voltage4
+    ChannelUnit: V
+    Calib Factor: 1.000092
+    Calib Offset: 0.011139
+    Sampling Frequency: 120000
+    InVoltRangeMin: -10
+    InVoltRangeMax: 10
+    LPF IsActive: False
+    LPF CutoffFreq: 0.1
+    LPF Filter: 0
+    LPF Coefficient: 1
+    LPF MaxFreq: 100
+    MeasMode: 0
+    IsFRAAnalysisRun: True
+    AnalysisMode: 0
+    SSICycle: 0
+    IsExcitationFreqOptimization: False
+    IsEnableImpDataFitting: False
+    IsMeas100kHzEnabled: False
+    Integration Time Type: 0
+    Integration Value: 0.4
+    Delay Time Type: 0
+    Delay Value: 0.4
+  End AD: DevDT_AD9836_Ch12
+  Begin Information: Cell Information
+    Surface Area: 18
+    Density: 0.04
+    Weight: 47
+  End Information: Cell Information
+  Freq(Hz)	Ampl	Bias	Time(Sec)	Z'(a)	Z''(b)	GD	Err	Range
+End Comments
+1.0000E+004	0.5	0	4.0000E-001	2.4185E-002	2.6193E-002	0	0	1
+7.9433E+003	0.5	0	7.9996E-001	2.3428E-002	2.1086E-002	0	0	1
+6.3096E+003	0.5	0	1.2000E+000	2.2595E-002	1.6850E-002	0	0	1
+5.0119E+003	0.5	0	1.6000E+000	2.2036E-002	1.3295E-002	0	0	1
+3.9811E+003	0.5	0	1.9999E+000	2.1690E-002	1.0325E-002	0	0	1
+3.1623E+003	0.5	0	2.4000E+000	2.1560E-002	7.8496E-003	0	0	1
+2.5119E+003	0.5	0	2.8001E+000	2.1582E-002	5.8147E-003	0	0	1
+1.9953E+003	0.5	0	3.2000E+000	2.1653E-002	4.1349E-003	0	0	1
+1.5849E+003	0.5	0	3.6000E+000	2.1876E-002	2.7547E-003	0	0	1
+1.2589E+003	0.5	0	4.0004E+000	2.2120E-002	1.6191E-003	0	0	1
+1.0000E+003	0.5	0	4.4004E+000	2.2432E-002	6.8010E-004	0	0	1
+7.9433E+002	0.5	0	4.8007E+000	2.2797E-002	-8.4522E-005	0	0	1
+6.3096E+002	0.5	0	5.2001E+000	2.3137E-002	-7.1590E-004	0	0	1
+5.0119E+002	0.5	0	5.5992E+000	2.3588E-002	-1.2361E-003	0	0	1
+3.9811E+002	0.5	0	5.9985E+000	2.3990E-002	-1.6477E-003	0	0	1
+3.1623E+002	0.5	0	6.3970E+000	2.4447E-002	-1.9850E-003	0	0	1
+2.5119E+002	0.5	0	6.7951E+000	2.4920E-002	-2.2479E-003	0	0	1
+1.9953E+002	0.5	0	7.1961E+000	2.5413E-002	-2.4507E-003	0	0	1
+1.5849E+002	0.5	0	7.5936E+000	2.5918E-002	-2.6006E-003	0	0	1
+1.2589E+002	0.5	0	7.9907E+000	2.6409E-002	-2.7073E-003	0	0	1
+1.0000E+002	0.5	0	8.3907E+000	2.6922E-002	-2.7645E-003	0	0	1
+7.9433E+001	0.5	0	8.7936E+000	2.7431E-002	-2.7784E-003	0	0	1
+6.3096E+001	0.5	0	9.1898E+000	2.7929E-002	-2.7617E-003	0	0	1
+5.0119E+001	0.5	0	9.5889E+000	2.8436E-002	-2.6771E-003	0	0	1
+3.9811E+001	0.5	0	9.9908E+000	2.8856E-002	-2.5772E-003	0	0	1
+3.1623E+001	0.5	0	1.0402E+001	2.9278E-002	-2.5012E-003	0	0	1
+2.5119E+001	0.5	0	1.0800E+001	2.9700E-002	-2.2679E-003	0	0	1
+1.9953E+001	0.5	0	1.1201E+001	2.9969E-002	-2.0822E-003	0	0	1
+1.5849E+001	0.5	0	1.1579E+001	3.0267E-002	-1.8860E-003	0	0	1
+1.2589E+001	0.5	0	1.1977E+001	3.0568E-002	-1.7483E-003	0	0	1
+1.0000E+001	0.5	0	1.2377E+001	3.0751E-002	-1.6177E-003	0	0	1
+7.9433E+000	0.5	0	1.2754E+001	3.1001E-002	-1.5270E-003	0	0	1
+6.3096E+000	0.5	0	1.3230E+001	3.1123E-002	-1.3723E-003	0	0	1
+5.0119E+000	0.5	0	1.3629E+001	3.1311E-002	-1.2760E-003	0	0	1
+3.9811E+000	0.5	0	1.4131E+001	3.1339E-002	-1.2980E-003	0	0	1
+3.1623E+000	0.5	0	1.4448E+001	3.1535E-002	-1.2277E-003	0	0	1
+2.5119E+000	0.5	0	1.4846E+001	3.1630E-002	-1.1952E-003	0	0	1
+1.9953E+000	0.5	0	1.5347E+001	3.1772E-002	-1.1395E-003	0	0	1
+1.5849E+000	0.5	0	1.5978E+001	3.2090E-002	-1.0803E-003	0	0	1
+1.2589E+000	0.5	0	1.6772E+001	3.2044E-002	-1.1065E-003	0	0	1
+1.0000E+000	0.5	0	1.7772E+001	3.2355E-002	-1.3467E-003	0	0	1
+7.9433E-001	0.5	0	1.9031E+001	3.2561E-002	-1.2952E-003	0	0	1
+6.3096E-001	0.5	0	2.0616E+001	3.2536E-002	-1.4412E-003	0	0	1
+5.0119E-001	0.5	0	2.2611E+001	3.2677E-002	-1.7533E-003	0	0	1
+3.9811E-001	0.5	0	2.5123E+001	3.2994E-002	-2.0598E-003	0	0	1
+3.1623E-001	0.5	0	2.8285E+001	3.3403E-002	-2.2591E-003	0	0	1
+2.5119E-001	0.5	0	3.2266E+001	3.3774E-002	-2.3730E-003	0	0	1
+1.9953E-001	0.5	0	3.7278E+001	3.4128E-002	-2.4839E-003	0	0	1
+1.5849E-001	0.5	0	4.3587E+001	3.4435E-002	-2.6141E-003	0	0	1
+1.2589E-001	0.5	0	5.1531E+001	3.4753E-002	-2.7915E-003	0	0	1
+1.0000E-001	0.5	0	6.1531E+001	3.5046E-002	-3.0429E-003	0	0	1
+7.9433E-002	0.5	0	7.4120E+001	3.5378E-002	-3.3564E-003	0	0	1
+6.3096E-002	0.5	0	8.9968E+001	3.5673E-002	-3.7547E-003	0	0	1
+5.0119E-002	0.5	0	1.0992E+002	3.6064E-002	-4.2421E-003	0	0	1
+3.9811E-002	0.5	0	1.3504E+002	3.6521E-002	-4.8254E-003	0	0	1
+3.1623E-002	0.5	0	1.6666E+002	3.7046E-002	-5.5131E-003	0	0	1
+2.5119E-002	0.5	0	2.0647E+002	3.7708E-002	-6.3042E-003	0	0	1
+1.9953E-002	0.5	0	2.5659E+002	3.8488E-002	-7.1977E-003	0	0	1
+1.5849E-002	0.5	0	3.1968E+002	3.9466E-002	-8.2009E-003	0	0	1
+1.2589E-002	0.5	0	3.9912E+002	4.0625E-002	-9.2938E-003	0	0	1
+1.0000E-002	0.5	0	4.9912E+002	4.2002E-002	-1.0430E-002	0	0	1
