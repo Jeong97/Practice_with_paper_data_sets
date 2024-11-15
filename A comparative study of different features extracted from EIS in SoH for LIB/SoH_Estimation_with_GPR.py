@@ -31,29 +31,36 @@ def setGraphFont():
 setGraphFont()
 
 
+
 '''Set the DataFrame from raw_data of Capacity'''
 # Set Capacity Raw data path
 cap_path = "C:/Users/jeongbs1/오토실리콘/1. python_code/Practice_with_paper_data_sets/A comparative study of different features extracted from EIS in SoH for LIB/raw_data(SDI)"
+
 # Load Raw data
 cap_df = pd.read_csv(cap_path+"./Cell1-cell4.txt", skiprows=2, sep='\t')
+
 # Set Columns
 cap_df_col = ["cycle_1_3", "Cell1_cap", "Cell1_dec", "Cell3_cap", "Cell3_dec", "cycle_2_4", "Cell2_cap", "Cell2_dec", "Cell4_cap", "Cell4_dec"]
+
 # Apply colums to DataFrame
 cap_df.columns = cap_df_col
+
 # Data processing for SoH calculation for each cell
 cap_df = cap_df.replace("--", np.nan).astype(float)
+
 # SoH calculation per cell
 for i in range(1,5):
     cap_column = f"Cell{i}_cap"
     soh_column = f"Cell{i}_SoH"
     cap_df[soh_column] = round((cap_df[cap_column].astype(float) / 2.75) * 100, 2)
+
 # Set SoH Dataframe column
 SoH_Colunms = ['cycle_1_3', 'Cell1_SoH', 'Cell3_SoH', 'cycle_2_4', 'Cell2_SoH', 'Cell4_SoH']
 
 # Make SoH Dataframe
 SoH_df = cap_df[SoH_Colunms]
 
-
+# Data settings for merging with EIS data
 def process_soh_df(df, cycle_col, soh_col, cell_name):
     # Make SoH DataFrame by Cell
     df = df[[cycle_col, soh_col]].dropna().copy()
@@ -63,20 +70,19 @@ def process_soh_df(df, cycle_col, soh_col, cell_name):
     df["Cell_Name"] = cell_name
     return df
 
+# Apply to individual cells
 SoH_df_cell1 = process_soh_df(SoH_df, 'cycle_1_3', 'Cell1_SoH', "Cell_1")
 SoH_df_cell2 = process_soh_df(SoH_df, 'cycle_2_4', 'Cell2_SoH', "Cell_2")
 SoH_df_cell3 = process_soh_df(SoH_df, 'cycle_1_3', 'Cell3_SoH', "Cell_3")
 SoH_df_cell4 = process_soh_df(SoH_df, 'cycle_2_4', 'Cell4_SoH', "Cell_4")
 
-
-# Specify column order before merging
+# relocation column order before merging
 SoH_df_cell1 = SoH_df_cell1[["Cell_Name", "Cycle", "SoH"]]
 SoH_df_cell2 = SoH_df_cell2[["Cell_Name", "Cycle", "SoH"]]
 SoH_df_cell3 = SoH_df_cell3[["Cell_Name", "Cycle", "SoH"]]
 SoH_df_cell4 = SoH_df_cell4[["Cell_Name", "Cycle", "SoH"]]
 
 
-'''Set the DataFrame from raw_data of EIS'''
 # Set Capacity Raw data path
 eis_forder_cell_path = "C:/Users/jeongbs1/오토실리콘/1. python_code/Practice_with_paper_data_sets/A comparative study of different features extracted from EIS in SoH for LIB/raw_data(SDI)"
 # Make folder list
@@ -105,7 +111,6 @@ for cell_name in eis_forder_cell_list:
 
 # make cell list
 cell_num = list(eis_raw_df.keys())
-
 
 for cell in cell_num:
     plt.figure()
@@ -160,9 +165,12 @@ for i, soh_df in enumerate([SoH_df_cell1, SoH_df_cell2, SoH_df_cell3, SoH_df_cel
 merged_df = pd.concat(merged_dfs, ignore_index=True)
 merged_df["Cycle"] = merged_df["Cycle"].astype(int)
 # merged_df.to_excel("C:/Users/jeongbs1/Downloads/merge_df.xlsx", index=False)
+
 '''Preprocessing Complete'''
 
 
+
+# Correlation between Features and Target
 numeric_df, corr_df = {}, {}
 for num in range(len(merged_dfs)):
     numeric_df[num] = merged_dfs[num].drop(columns=["Cycle", "SoC", "Temp", "Cell_Name"], axis=1)
@@ -174,30 +182,6 @@ for num in range(len(merged_dfs)):
 
 
 '''Machine Learning'''
-
-''' BroadBand '''
-### Study_1 : Broadband Version
-# Create a data frame to apply to ML Model
-Broadband_df = merged_df.copy()
-
-# Separate by case
-def separate_cases(df, cell_name):
-    train_df = df[df['Cell_Name'] != cell_name].copy().reset_index(drop=True)
-    test_df = df[df['Cell_Name'] == cell_name].copy().reset_index(drop=True)
-    return train_df, test_df
-
-# Create a data frame for each case by calling a function
-Broadband_cases = {"train" : {}, "test" : {}}
-for i in np.arange(1,5):
-    train_df, test_df = separate_cases(Broadband_df, f'Cell_{i}')
-    Broadband_cases["train"][f'case{i}_train_df'] = train_df
-    Broadband_cases["test"][f'case{i}_test_df'] = test_df
-
-# Separate train and test dataframes
-B_train_list = list(Broadband_cases["train"].keys())
-B_test_list = list(Broadband_cases["test"].keys())
-
-
 ''' Scikit-learn method '''
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
@@ -209,7 +193,15 @@ import warnings
 warnings.filterwarnings("ignore", category=ConvergenceWarning)
 
 
-# 성능 지표를 계산하는 함수 정의
+
+# Separate by case
+def separate_cases(df, cell_name):
+    train_df = df[df['Cell_Name'] != cell_name].copy().reset_index(drop=True)
+    test_df = df[df['Cell_Name'] == cell_name].copy().reset_index(drop=True)
+    return train_df, test_df
+
+
+# Define a function to calculate performance metrics
 def calculate_performance_metrics(y_true, y_pred, y_std):
     max_absolute_error = np.max(np.abs(y_true - y_pred) / np.abs(y_true)) * 100
     mean_absolute_error_perc = mean_absolute_error(y_true, y_pred) / np.mean(np.abs(y_true)) * 100
@@ -227,8 +219,10 @@ def calculate_performance_metrics(y_true, y_pred, y_std):
             'Mean Standard Deviation (%)': mean_std_dev}
 
 
-# GPR 모델 학습 및 예측 함수
-def train_and_predict_gpr(train_x, train_y, test_x):
+
+''' BroadBand '''
+# GPR model training and prediction function
+def train_and_predict_gpr_Braodband(train_x, train_y, test_x):
     scaler = StandardScaler()
     train_x_scaled = scaler.fit_transform(train_x)
     test_x_scaled = scaler.transform(test_x)
@@ -239,48 +233,63 @@ def train_and_predict_gpr(train_x, train_y, test_x):
     return y_pred, y_std
 
 
-# 입력 열 목록 정의 (불필요한 열 제외)
+# Create a data frame to apply to ML Model
+Broadband_df = merged_df.copy()
+
+# Create a data frame for each case by calling a function
+Broadband_cases = {"train" : {}, "test" : {}}
+for i in np.arange(1,5):
+    train_df, test_df = separate_cases(Broadband_df, f'Cell_{i}')
+    Broadband_cases["train"][f'case{i}_train_df'] = train_df
+    Broadband_cases["test"][f'case{i}_test_df'] = test_df
+
+# Separate train and test dataframes
+B_train_list = list(Broadband_cases["train"].keys())
+B_test_list = list(Broadband_cases["test"].keys())
+
+# Define the list of input columns (excluding unnecessary columns)
 B_input_drop_col = ["Cell_Name", "Cycle", "SoH", "SoC", "Temp"]
 
-# 성능 지표 저장할 리스트 초기화
+# Initialize the list to store performance indicators
 B_performance_metrics = []
 
-# 예측 결과를 저장할 개별 리스트 초기화
+# Initialize individual lists to store prediction results
 all_actuals, all_predictions, all_std_devs = [], [], []
 
-# 각 데이터셋에 대해 반복적으로 모델 학습 및 예측 수행
+# Perform model training and prediction repeatedly for each dataset
 for i in range(len(B_train_list)):
-    # 각 데이터셋에 대해 학습 및 테스트 데이터 정의
+    # Define training and test data for each dataset
     train_x_raw = Broadband_cases["train"][B_train_list[i]].drop(columns=B_input_drop_col).values
     train_y_raw = Broadband_cases["train"][B_train_list[i]]["SoH"].values
     test_x_raw = Broadband_cases["test"][B_test_list[i]].drop(columns=B_input_drop_col).values
     test_y_raw = Broadband_cases["test"][B_test_list[i]]["SoH"].values
 
-    # GPR 모델 학습 및 예측
-    y_pred, y_std = train_and_predict_gpr(train_x_raw, train_y_raw, test_x_raw)
+    # GPR model training and prediction
+    y_pred, y_std = train_and_predict_gpr_Braodband(train_x_raw, train_y_raw, test_x_raw)
 
-    # 성능 지표 계산 후 리스트에 추가
+    # Calculate performance indicators and add to list
     metrics = calculate_performance_metrics(test_y_raw, y_pred, y_std)
     B_performance_metrics.append(metrics)
 
-    # 예측 결과를 개별 리스트에 추가
+    # Add prediction results to individual list
     all_actuals.append(list(test_y_raw))  # 실제 값
     all_predictions.append(list(y_pred))  # 예측 값
     all_std_devs.append(list(y_std))  # 예측 표준편차
 
-# 성능 지표를 DataFrame으로 변환
+# Convert performance metrics to DataFrame
 B_performance_df = pd.DataFrame(B_performance_metrics)
-# performance_df.to_excel("C:/Users/jeongbs1/Downloads/Broadband_model_performance.xlsx", index=False)
 
-# Seaborn 스타일 설정
+
+# Seaborn style settings
 sns.set(style="darkgrid")
-# 색상 리스트 정의 (각 데이터 요소에 대해 일관된 색상 사용)
+
+# Define a color list (use consistent colors for each data element)
 colors = sns.color_palette("Spectral", 3)
-# actual_color , predicted_color , confidence_color  = colors[0], colors[1], colors[2]
-actual_color = '#E74C3C'        # 실제값 색상 (눈에 편안한 주황색 계열)
-predicted_color = '#2E86C1'     # 예측값 색상 (진한 파란색 계열)
-confidence_color = '#808080'    # 신뢰 구간 색상 (연한 회색 계열)
-# Cycle, Actual SoH, Predicted SoH, 및 신뢰 구간 계산
+actual_color = '#E74C3C'
+predicted_color = '#2E86C1'
+confidence_color = '#808080'
+
+# Calculate Cycle, Actual SoH, Predicted SoH, and confidence intervals
 plt.figure(figsize=(12, 8))
 for n in range(len(B_train_list)):
     plt.subplot(2, 2, n + 1)
@@ -289,48 +298,54 @@ for n in range(len(B_train_list)):
     predicted_soh = all_predictions[n]
     std_dev = all_std_devs[n]
 
-    # 95% 신뢰 구간 계산
+    # Calculate 95% confidence interval
     lower_bound = np.array(predicted_soh) - 1.96 * np.array(std_dev)
     upper_bound = np.array(predicted_soh) + 1.96 * np.array(std_dev)
 
-    # 그래프 그리기
+    # Draw a graph
     plt.plot(x, actual_soh, '*', color=actual_color, markersize=7, label='Actual SoH')  # 실제값 색상
     plt.plot(x, predicted_soh, '-', color=predicted_color, linewidth=3, label='Predicted SoH')  # 예측값 색상
     plt.fill_between(x, lower_bound, upper_bound, color=confidence_color, alpha=0.3, label='95% Confidence Interval')  # 신뢰 구간 색상
 
-    # 서브플롯마다 제목 및 설정 추가
+    # Add title and settings to each subplot
     plt.xlabel("Cycle", fontsize=12, fontweight='bold')
     plt.ylabel("SoH (%)", fontsize=12, fontweight='bold')
     plt.title(f"SoH Prediction - Cell {n+1}", fontsize=14, fontweight='bold')
     plt.legend(loc="upper right", fontsize="small")
 
-# 전체 레이아웃 및 제목 설정
+# Set overall layout and title
 plt.suptitle("Broadband SoH Prediction for Each Cell", fontsize=16, fontweight='bold')
 plt.tight_layout()
 
 
-# 성능 지표 목록
+# List of performance indicators
 metrics = ["Maximum Absolute Error (%)", "Mean Absolute Error (%)",
            "Root Mean Square Error (%)", "Coverage Probability (%)",
            "Mean Standard Deviation (%)"]
-# Seaborn 팔레트를 사용하여 Case별 색상 정의
+
+# Define colors for each case using the Seaborn palette
 colors = sns.color_palette("Set2", len(B_performance_df["Cell Name"]))
-# 2x3 서브플롯 생성 (빈 자리 하나 포함)
+
+# Create a 2x3 subplot (including one empty spot)
 fig, axes = plt.subplots(2, 3, figsize=(14, 8))
-# 각 성능 지표마다 막대 그래프 그리기
+
+# Draw a bar graph for each performance indicator
 for i, metric in enumerate(metrics):
-    row, col = divmod(i, 3)  # 2x3 배열의 행과 열 계산
-    # 각 Case에 대해 동일한 색상으로 막대 그래프 생성
+    row, col = divmod(i, 3)
+    # Create a bar graph with the same color for each Case
     axes[row, col].bar(B_performance_df["Cell Name"], B_performance_df[metric], color=colors, edgecolor='black')
     axes[row, col].set_title(metric, fontsize=12, fontweight='bold')
     axes[row, col].set_ylabel(metric, fontsize=10, fontweight='bold')
     axes[row, col].grid(True, linestyle='--', alpha=0.7)
-# 빈 서브플롯 숨기기
+
+# Hide empty subplots
 axes[1, 2].axis("off")
-# X축 레이블 설정
+
+# Set X-axis label
 for ax in axes[1, :2]:  # 마지막 행의 첫 두 축에만 x축 레이블 추가
     ax.set_xlabel("Cell Name", fontsize=12, fontweight='bold')
-# 전체 레이아웃 설정
+
+# Set overall layout
 plt.suptitle("Broadband Performance Metrics Comparison by Cell", fontsize=16, fontweight='bold')
 plt.tight_layout()
 
