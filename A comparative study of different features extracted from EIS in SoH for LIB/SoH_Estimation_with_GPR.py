@@ -182,7 +182,6 @@ for num in range(len(merged_dfs)):
 
 
 '''Machine Learning'''
-''' Scikit-learn method '''
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from sklearn.gaussian_process import GaussianProcessRegressor
@@ -191,8 +190,10 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error
 from sklearn.exceptions import ConvergenceWarning
 import warnings
 warnings.filterwarnings("ignore", category=ConvergenceWarning)
-
-
+import gpytorch
+from sklearn.pipeline import Pipeline
+import optuna
+import GPy
 
 # Separate by case
 def separate_cases(df, cell_name):
@@ -219,18 +220,97 @@ def calculate_performance_metrics(y_true, y_pred, y_std):
             'Mean Standard Deviation (%)': mean_std_dev}
 
 
-
 ''' BroadBand '''
-# GPR model training and prediction function
-def train_and_predict_gpr_Braodband(train_x, train_y, test_x):
+# SK-learn method
+def train_and_predict_SK_Bayesian(train_x, train_y, test_x, test_y):
+    # 스케일링 추가
     scaler = StandardScaler()
     train_x_scaled = scaler.fit_transform(train_x)
     test_x_scaled = scaler.transform(test_x)
-    kernel = C(1.0, (1e-3, 1e4)) * Matern(length_scale=1.0, length_scale_bounds=(1e-2, 1e2), nu=1.5) + WhiteKernel(noise_level=1e-3, noise_level_bounds=(1e-6, 1e1))
-    gpr = GaussianProcessRegressor(kernel=kernel, n_restarts_optimizer=20, alpha=0.1)
+
+    # Bayesian Optimization
+    def objective(trial):
+        alpha = trial.suggest_loguniform("alpha", 1e-5, 1e-1)
+        length_scale = trial.suggest_uniform("length_scale", 0.1, 10.0)
+        constant_value = trial.suggest_uniform("constant_value", 0.1, 10.0)
+        noise_level = trial.suggest_loguniform("noise_level", 1e-6, 1e-2)
+        nu = trial.suggest_categorical("nu", [1.5])
+
+        kernel = (
+            C(constant_value=constant_value, constant_value_bounds=(1e-3, 1e3))
+            * Matern(length_scale=length_scale, length_scale_bounds=(1e-2, 1e2), nu=nu)
+            + WhiteKernel(noise_level=noise_level, noise_level_bounds=(1e-6, 1e1))
+        )
+        gpr = GaussianProcessRegressor(kernel=kernel, alpha=alpha, random_state=42)
+        gpr.fit(train_x_scaled, train_y)
+        y_pred, _ = gpr.predict(test_x_scaled, return_std=True)
+        mse = mean_squared_error(test_y, y_pred)
+        return mse
+
+    # Optuna Study
+    study = optuna.create_study(direction="minimize")
+    study.optimize(objective, n_trials=50)
+
+    # 최적화된 GPR 모델
+    best_params = study.best_params
+    kernel = (
+        C(constant_value=best_params["constant_value"], constant_value_bounds=(1e-3, 1e3))
+        * Matern(length_scale=best_params["length_scale"], length_scale_bounds=(1e-2, 1e2), nu=best_params["nu"])
+        + WhiteKernel(noise_level=best_params["noise_level"], noise_level_bounds=(1e-6, 1e1))
+    )
+    gpr = GaussianProcessRegressor(kernel=kernel, alpha=best_params["alpha"], random_state=42, n_restarts_optimizer=20)
     gpr.fit(train_x_scaled, train_y)
     y_pred, y_std = gpr.predict(test_x_scaled, return_std=True)
-    return y_pred, y_std
+
+    # Confidence intervals
+    lower_bound = y_pred - 1.96 * y_std
+    upper_bound = y_pred + 1.96 * y_std
+
+    return y_pred, y_std, lower_bound, upper_bound, best_params
+
+# GPy Methode with Extended Optimization
+def train_and_predict_GPy_Bayesian(train_x, train_y, test_x, test_y):
+    # 스케일링 추가
+    scaler = StandardScaler()
+    train_x_scaled = scaler.fit_transform(train_x)
+    test_x_scaled = scaler.transform(test_x)
+
+    # Bayesian Optimization
+    def objective(trial):
+        alpha = trial.suggest_loguniform("alpha", 1e-5, 1e-1)
+        length_scale = trial.suggest_uniform("length_scale", 0.1, 10.0)
+        variance = trial.suggest_uniform("variance", 0.1, 10.0)  # 추가: 커널 스케일
+        noise_level = trial.suggest_loguniform("noise_level", 1e-6, 1e-2)  # 추가: 노이즈 수준
+        nu = trial.suggest_categorical("nu", [1.5, 2.5])  # 추가: nu 최적화
+
+        # 확장된 커널 조합
+        kernel = GPy.kern.Matern32(input_dim=train_x.shape[1], lengthscale=length_scale, variance=variance) + GPy.kern.White(input_dim=train_x.shape[1], variance=noise_level)
+        model = GPy.models.GPRegression(train_x_scaled, train_y.reshape(-1, 1), kernel)
+        model.Gaussian_noise.variance = alpha  # 노이즈 최적화
+        model.optimize(messages=False)
+        y_pred, y_var = model.predict(test_x_scaled)
+        mse = mean_squared_error(test_y, y_pred.ravel())
+        return mse
+
+    study = optuna.create_study(direction="minimize")
+    study.optimize(objective, n_trials=50)
+
+    # 최적화된 GPR 모델
+    best_params = study.best_params
+    kernel = (
+        GPy.kern.Matern32(input_dim=train_x.shape[1], lengthscale=best_params["length_scale"], variance=best_params["variance"])
+        + GPy.kern.White(input_dim=train_x.shape[1], variance=best_params["noise_level"])
+    )
+    model = GPy.models.GPRegression(train_x_scaled, train_y.reshape(-1, 1), kernel)
+    model.Gaussian_noise.variance = best_params["alpha"]
+    model.optimize(messages=False)
+    y_pred, y_var = model.predict(test_x_scaled)
+    y_std = np.sqrt(y_var.ravel())
+
+    lower_bound = y_pred.ravel() - 1.96 * y_std
+    upper_bound = y_pred.ravel() + 1.96 * y_std
+
+    return y_pred.ravel(), y_std, lower_bound, upper_bound, best_params
 
 
 # Create a data frame to apply to ML Model
@@ -250,72 +330,84 @@ B_test_list = list(Broadband_cases["test"].keys())
 # Define the list of input columns (excluding unnecessary columns)
 B_input_drop_col = ["Cell_Name", "Cycle", "SoH", "SoC", "Temp"]
 
-# Initialize the list to store performance indicators
-B_performance_metrics = []
+# Initialize the list to store performance indicator
+performance_metrics = {"SK-learn": [], "GPy": []}
+predicted_results = {"SK-learn": [], "GPy": []}
 
-# Initialize individual lists to store prediction results
-all_actuals, all_predictions, all_std_devs = [], [], []
-
-# Perform model training and prediction repeatedly for each dataset
 for i in range(len(B_train_list)):
-    # Define training and test data for each dataset
+    # 데이터 분리
     train_x_raw = Broadband_cases["train"][B_train_list[i]].drop(columns=B_input_drop_col).values
     train_y_raw = Broadband_cases["train"][B_train_list[i]]["SoH"].values
     test_x_raw = Broadband_cases["test"][B_test_list[i]].drop(columns=B_input_drop_col).values
     test_y_raw = Broadband_cases["test"][B_test_list[i]]["SoH"].values
 
-    # GPR model training and prediction
-    y_pred, y_std = train_and_predict_gpr_Braodband(train_x_raw, train_y_raw, test_x_raw)
+    # SK-learn 방식 예측
+    y_pred_sk, y_std_sk, lower_sk, upper_sk, best_params_sk = train_and_predict_SK_Bayesian(train_x_raw, train_y_raw, test_x_raw, test_y_raw)
+    metrics_sk = calculate_performance_metrics(test_y_raw, y_pred_sk, y_std_sk)
+    metrics_sk["Method"] = "SK-learn"
+    metrics_sk["Case"] = f"Cell {i + 1}"
+    performance_metrics["SK-learn"].append(metrics_sk)
+    predicted_results["SK-learn"].append({
+        "Actual": test_y_raw.tolist(),
+        "Predicted": y_pred_sk.tolist(),
+        "Lower Bound": lower_sk.tolist(),
+        "Upper Bound": upper_sk.tolist(),
+        "Case": f"Cell {i + 1}",
+    })
 
-    # Calculate performance indicators and add to list
-    metrics = calculate_performance_metrics(test_y_raw, y_pred, y_std)
-    B_performance_metrics.append(metrics)
+    # GPy 방식 예측
+    y_pred_gpy, y_std_gpy, lower_gpy, upper_gpy, best_params_gpy = train_and_predict_GPy_Bayesian(train_x_raw, train_y_raw, test_x_raw, test_y_raw)
+    metrics_gpy = calculate_performance_metrics(test_y_raw, y_pred_gpy, y_std_gpy)
+    metrics_gpy["Method"] = "GPy"
+    metrics_gpy["Case"] = f"Cell {i + 1}"
+    performance_metrics["GPy"].append(metrics_gpy)
+    predicted_results["GPy"].append({
+        "Actual": test_y_raw.tolist(),
+        "Predicted": y_pred_gpy.tolist(),
+        "Lower Bound": lower_gpy.tolist(),
+        "Upper Bound": upper_gpy.tolist()})
 
-    # Add prediction results to individual list
-    all_actuals.append(list(test_y_raw))  # 실제 값
-    all_predictions.append(list(y_pred))  # 예측 값
-    all_std_devs.append(list(y_std))  # 예측 표준편차
+# 출력 결과를 데이터프레임으로 저장
+B_predicted_results_df = {method: pd.DataFrame(predicted_results[method]) for method in ["SK-learn", "GPy"]}
 
-# Convert performance metrics to DataFrame
-B_performance_df = pd.DataFrame(B_performance_metrics)
+# 두 결과를 하나의 데이터프레임으로 결합
+B_performance_df = pd.concat([pd.DataFrame(performance_metrics["SK-learn"]), pd.DataFrame(performance_metrics["GPy"])])
+B_performance_df[B_performance_df["Method"]=="GPy"]
 
 
-# Seaborn style settings
-sns.set(style="darkgrid")
-
-# Define a color list (use consistent colors for each data element)
+# Calculate Cycle, Actual SoH, Predicted SoH, and confidence intervals for each method
 colors = sns.color_palette("Spectral", 3)
 actual_color = '#E74C3C'
 predicted_color = '#2E86C1'
 confidence_color = '#808080'
 
-# Calculate Cycle, Actual SoH, Predicted SoH, and confidence intervals
-plt.figure(figsize=(12, 8))
-for n in range(len(B_train_list)):
-    plt.subplot(2, 2, n + 1)
-    x = Broadband_cases["test"][B_test_list[n]]["Cycle"].values
-    actual_soh = Broadband_cases["test"][B_test_list[n]]["SoH"].values
-    predicted_soh = all_predictions[n]
-    std_dev = all_std_devs[n]
+# Methods to loop over
+methods = ["SK-learn", "GPy"]
 
-    # Calculate 95% confidence interval
-    lower_bound = np.array(predicted_soh) - 1.96 * np.array(std_dev)
-    upper_bound = np.array(predicted_soh) + 1.96 * np.array(std_dev)
+for method in methods:
+    plt.figure(figsize=(12, 8))
+    for n in range(len(B_train_list)):
+        plt.subplot(2, 2, n + 1)
+        x = Broadband_cases["test"][B_test_list[n]]["Cycle"]
+        actual_soh = B_predicted_results_df[method]["Actual"][n]
+        predicted_soh = B_predicted_results_df[method]["Predicted"][n]
+        lower_bound = B_predicted_results_df[method]["Lower Bound"][n]
+        upper_bound = B_predicted_results_df[method]["Upper Bound"][n]
 
-    # Draw a graph
-    plt.plot(x, actual_soh, '*', color=actual_color, markersize=7, label='Actual SoH')  # 실제값 색상
-    plt.plot(x, predicted_soh, '-', color=predicted_color, linewidth=3, label='Predicted SoH')  # 예측값 색상
-    plt.fill_between(x, lower_bound, upper_bound, color=confidence_color, alpha=0.3, label='95% Confidence Interval')  # 신뢰 구간 색상
+        # Draw a graph
+        plt.plot(x, actual_soh, '*', color=actual_color, markersize=7, label='Actual SoH')  # 실제값 색상
+        plt.plot(x, predicted_soh, '-', color=predicted_color, linewidth=3, label='Predicted SoH')  # 예측값 색상
+        plt.fill_between(x, lower_bound, upper_bound, color=confidence_color, alpha=0.3, label='95% Confidence Interval')  # 신뢰 구간 색상
 
-    # Add title and settings to each subplot
-    plt.xlabel("Cycle", fontsize=12, fontweight='bold')
-    plt.ylabel("SoH (%)", fontsize=12, fontweight='bold')
-    plt.title(f"SoH Prediction - Cell {n+1}", fontsize=14, fontweight='bold')
-    plt.legend(loc="upper right", fontsize="small")
+        # Add title and settings to each subplot
+        plt.xlabel("Cycle", fontsize=12, fontweight='bold')
+        plt.ylabel("SoH (%)", fontsize=12, fontweight='bold')
+        plt.title(f"{method} SoH Prediction - Cell {n+1}", fontsize=14, fontweight='bold')
+        plt.legend(loc="upper right", fontsize="small")
 
-# Set overall layout and title
-plt.suptitle("Broadband SoH Prediction for Each Cell", fontsize=16, fontweight='bold')
-plt.tight_layout()
+    # Set overall layout and title
+    plt.suptitle(f"{method} Broadband SoH Prediction for Each Cell", fontsize=16, fontweight='bold')
+    plt.tight_layout()
 
 
 # List of performance indicators
@@ -323,37 +415,81 @@ metrics = ["Maximum Absolute Error (%)", "Mean Absolute Error (%)",
            "Root Mean Square Error (%)", "Coverage Probability (%)",
            "Mean Standard Deviation (%)"]
 
-# Define colors for each case using the Seaborn palette
-colors = sns.color_palette("Set2", len(B_performance_df["Cell Name"]))
+# Iterate over methods
+methods = ["SK-learn", "GPy"]
+for method in methods:
+    # Filter performance dataframe for the specific method
+    method_performance_df = B_performance_df[B_performance_df["Method"] == method]
 
-# Create a 2x3 subplot (including one empty spot)
+    # Define colors for each case using the Seaborn palette
+    colors = sns.color_palette("Set2", len(method_performance_df["Case"]))
+
+    # Create a 2x3 subplot (including one empty spot)
+    fig, axes = plt.subplots(2, 3, figsize=(14, 8))
+
+    # Draw a bar graph for each performance indicator
+    for i, metric in enumerate(metrics):
+        row, col = divmod(i, 3)
+        # Create a bar graph with the same color for each Case
+        axes[row, col].bar(method_performance_df["Case"], method_performance_df[metric], color=colors, edgecolor='black')
+        axes[row, col].set_title(metric, fontsize=12, fontweight='bold')
+        axes[row, col].set_ylabel(metric, fontsize=10, fontweight='bold')
+        axes[row, col].grid(True, linestyle='--', alpha=0.7)
+
+    # Hide empty subplots
+    axes[1, 2].axis("off")
+
+    # Set X-axis label
+    for ax in axes[1, :2]:  # 마지막 행의 첫 두 축에만 x축 레이블 추가
+        ax.set_xlabel("Cell Name", fontsize=12, fontweight='bold')
+
+    # Set overall layout and title for the method
+    plt.suptitle(f"{method} Broadband Performance Metrics Comparison by Cell", fontsize=16, fontweight='bold')
+    plt.tight_layout()
+
+
+# Define colors for each method using the Seaborn palette
+colors = sns.color_palette("Set1", len(methods))
+
+# Create a 2x3 subplot for comparison (including one empty spot)
 fig, axes = plt.subplots(2, 3, figsize=(14, 8))
 
-# Draw a bar graph for each performance indicator
+# Iterate over performance metrics to compare methods
 for i, metric in enumerate(metrics):
     row, col = divmod(i, 3)
-    # Create a bar graph with the same color for each Case
-    axes[row, col].bar(B_performance_df["Cell Name"], B_performance_df[metric], color=colors, edgecolor='black')
+
+    # Create a bar graph comparing methods for the current metric
+    comparison_data = B_performance_df.pivot(index="Case", columns="Method", values=metric)
+    comparison_data.plot(kind="bar", ax=axes[row, col], color=colors, edgecolor='black')
+
+    # Set titles and labels
     axes[row, col].set_title(metric, fontsize=12, fontweight='bold')
     axes[row, col].set_ylabel(metric, fontsize=10, fontweight='bold')
+    axes[row, col].set_xlabel("Cell Name", fontsize=10, fontweight='bold')
     axes[row, col].grid(True, linestyle='--', alpha=0.7)
-
-# Hide empty subplots
+    axes[row, col].legend(title="Method", fontsize=8, loc="best")
+# Hide empty subplot
 axes[1, 2].axis("off")
-
-# Set X-axis label
-for ax in axes[1, :2]:  # 마지막 행의 첫 두 축에만 x축 레이블 추가
-    ax.set_xlabel("Cell Name", fontsize=12, fontweight='bold')
-
 # Set overall layout
-plt.suptitle("Broadband Performance Metrics Comparison by Cell", fontsize=16, fontweight='bold')
+plt.suptitle("Broadband Performance Metrics Comparison by Metric and Method", fontsize=16, fontweight='bold')
 plt.tight_layout()
 
 
 
 ''' Fixed_Frequency '''
-### Study_1 : Broadband Version
 # Create a data frame to apply to ML Model
+def train_and_predict_gpr_Fixed(train_x, train_y, test_x):
+    scaler = StandardScaler()
+    train_x_scaled = scaler.fit_transform(train_x)
+    test_x_scaled = scaler.transform(test_x)
+    kernel = C(1.0, (1e-3, 1e4)) * Matern(length_scale=1.0, length_scale_bounds=(1e-2, 1e2), nu=1.5) + WhiteKernel(noise_level=1e-3, noise_level_bounds=(1e-6, 1e1))
+    gpr = GaussianProcessRegressor(kernel=kernel, n_restarts_optimizer=20, alpha=0.1)
+    gpr.fit(train_x_scaled, train_y)
+    y_pred, y_std = gpr.predict(test_x_scaled, return_std=True)
+    return y_pred, y_std
+
+
+### Study_1 : Broadband Version
 fixed_df = merged_df.copy()
 
 cell_info_col = ["Cell_Name", "Cycle", "SoH"]
@@ -376,113 +512,294 @@ for num, case_key in enumerate(fixed_case_df.keys()):
         fixed_hold_out[num]["test"][f'case{i}_test_df'] = test_df
 
 
+# 성능 지표 및 예측 결과 저장 초기화
+F_performance_metrics = {"SK-learn": [], "GPy": []}
+F_predicted_results = {"SK-learn": [], "GPy": []}
 
-# 성능 지표를 계산하는 함수 정의 (coverage 계산 조정)
-def calculate_performance_metrics_F(y_true, y_pred, y_std):
+# 각 fixed_case 반복
+for num in range(len(fixed_cases_list)):
+    # Train/Test 데이터 분리
+    F_train_list = list(fixed_hold_out[num]["train"].keys())
+    F_test_list = list(fixed_hold_out[num]["test"].keys())
+
+    for method in ["SK-learn", "GPy"]:
+        for i in range(len(F_train_list)):
+            # 훈련 및 테스트 데이터 준비
+            train_x_raw = fixed_hold_out[num]["train"][F_train_list[i]].drop(
+                columns=["Cell_Name", "Cycle", "SoH"]).values
+            train_y_raw = fixed_hold_out[num]["train"][F_train_list[i]]["SoH"].values
+            test_x_raw = fixed_hold_out[num]["test"][F_test_list[i]].drop(columns=["Cell_Name", "Cycle", "SoH"]).values
+            test_y_raw = fixed_hold_out[num]["test"][F_test_list[i]]["SoH"].values
+
+            # 모델 학습 및 예측
+            if method == "SK-learn":
+                y_pred, y_std, lower_bound, upper_bound, best_params = train_and_predict_SK_Bayesian(
+                    train_x_raw, train_y_raw, test_x_raw, test_y_raw
+                )
+            else:  # GPy 방식
+                y_pred, y_std, lower_bound, upper_bound, best_params = train_and_predict_GPy_Bayesian(
+                    train_x_raw, train_y_raw, test_x_raw, test_y_raw
+                )
+
+            # 성능 지표 계산
+            metrics = calculate_performance_metrics(test_y_raw, y_pred, y_std)
+            metrics["Method"] = method
+            metrics["Case"] = f"Fixed {num + 1}"
+            F_performance_metrics[method].append(metrics)
+
+            # 예측 결과 저장
+            F_predicted_results[method].append({
+                "Case": f"Fixed {num + 1}",
+                "Actual": test_y_raw.tolist(),
+                "Predicted": y_pred.tolist(),
+                "Lower Bound": lower_bound.tolist(),
+                "Upper Bound": upper_bound.tolist(),})
+
+# 성능 지표 데이터프레임으로 변환
+F_performance_df = pd.concat([pd.DataFrame(F_performance_metrics["SK-learn"]),
+                              pd.DataFrame(F_performance_metrics["GPy"])])
+
+# 예측 결과 데이터프레임으로 변환
+F_predicted_results_df = {method: pd.DataFrame(F_predicted_results[method]) for method in ["SK-learn", "GPy"]}
+
+
+fixed_mean_result_df = F_performance_df[(F_performance_df["Method"]=="GPy")&(F_performance_df["Case"].str.contains("Fixed 4"))]
+
+
+
+# Iterate over Fixed Cases
+fixed_plot_cases = ["Fixed 1", "Fixed 2", "Fixed 3", "Fixed 4"]
+methods = ["SK-learn", "GPy"]
+
+# Seaborn 스타일 설정
+sns.set(style="darkgrid")
+
+# 색상 리스트 정의 (각 데이터 요소에 대해 일관된 색상 사용)
+colors = sns.color_palette("Spectral", 3)
+actual_color = '#E74C3C'  # 실제값 색상 (눈에 편안한 주황색 계열)
+predicted_color = '#2E86C1'  # 예측값 색상 (진한 파란색 계열)
+confidence_color = '#808080'  # 신뢰 구간 색상 (연한 회색 계열)
+
+
+for f_case in ["Fixed 1", "Fixed 2", "Fixed 3", "Fixed 4"]:
+    method = methods[0]
+    # Filter results for the specific Fixed Case and method
+    fixed_plot_df = F_predicted_results_df[methods[0]][F_predicted_results_df[methods[0]]["Case"].str.contains(f_case)]
+
+    # Create a figure for the Fixed Case
+    plt.figure(figsize=(14, 10))
+
+    # Iterate over the rows in the filtered dataframe (one subplot per Cell)
+    for n in range(len(fixed_plot_df)):
+        plt.subplot(2, 2, n + 1)
+        x = fixed_hold_out[n]["test"][F_test_list[n]]["Cycle"].values
+        actual_soh = fixed_plot_df["Actual"].reset_index(drop=True)[n]
+        predicted_soh = fixed_plot_df["Predicted"].reset_index(drop=True)[n]
+        lower_bound = fixed_plot_df["Lower Bound"].reset_index(drop=True)[n]
+        upper_bound = fixed_plot_df["Upper Bound"].reset_index(drop=True)[n]
+
+        # Plot Actual SoH
+        plt.plot(x, actual_soh, '*', color=actual_color, markersize=7, label='Actual SoH')
+
+        # Plot Predicted SoH
+        plt.plot(x, predicted_soh, '-', color=predicted_color, linewidth=3, label='Predicted SoH')
+
+        # Plot Confidence Interval
+        plt.fill_between(x, lower_bound, upper_bound, color=confidence_color, alpha=0.3,
+                         label='95% Confidence Interval')
+
+        # Add subplot title and labels
+        plt.xlabel("Cycle", fontsize=12, fontweight='bold')
+        plt.ylabel("SoH (%)", fontsize=12, fontweight='bold')
+        plt.title(f"{method} - {f_case}", fontsize=14, fontweight='bold')
+        plt.legend(loc="upper right", fontsize="small")
+
+    # Set the overall title for the figure
+    plt.suptitle(f"{method} - {f_case} SoH Predictions", fontsize=16, fontweight='bold')
+    plt.tight_layout()
+
+
+# 성능 비교를 위한 지표
+metrics = ["Maximum Absolute Error (%)", "Mean Absolute Error (%)",
+           "Root Mean Square Error (%)", "Coverage Probability (%)",
+           "Mean Standard Deviation (%)"]
+
+# 같은 모델 내에서 비교할 방법 (예: "SK-learn")
+method = "SK-learn"
+
+# 2x3 서브플롯 생성 (마지막 subplot은 비어 있게 유지)
+fig, axes = plt.subplots(2, 3, figsize=(14, 8))
+
+# 각 성능 지표에 대해 반복
+for i, metric in enumerate(metrics):
+    row, col = divmod(i, 3)
+    ax = axes[row, col]
+
+    # 지표에 따라 Fixed 모델 비교 데이터 생성
+    comparison_data = F_performance_df[(F_performance_df["Method"] == method)]
+    metric_data = comparison_data[["Cell Name", metric]]
+
+    # 막대 그래프 그리기
+    sns.barplot(
+        x="Cell Name",
+        y=metric,
+        data=metric_data,
+        ax=ax,
+        palette=sns.color_palette("Set2", len(comparison_data["Cell Name"].unique())),
+        edgecolor='black',
+        hue="Cell Name",  # `hue`를 추가하여 경고 제거
+        dodge=False  # hue로 인해 발생하는 막대 간 위치 이동 방지
+    )
+
+    # 서브플롯 제목 및 레이블 설정
+    ax.set_title(metric, fontsize=12, fontweight='bold')
+    ax.set_ylabel(metric, fontsize=10, fontweight='bold')
+    ax.set_xlabel("Cell Name", fontsize=10, fontweight='bold')
+    ax.grid(True, linestyle='--', alpha=0.7)
+
+    # 범례가 있을 경우 제거
+    legend = ax.get_legend()
+    if legend is not None:  # 범례 존재 여부 확인
+        legend.remove()
+
+# 빈 서브플롯 숨기기
+if len(metrics) < 6:
+    for j in range(len(metrics), 6):
+        row, col = divmod(j, 3)
+        axes[row, col].axis("off")
+
+
+# 전체 제목 설정
+plt.suptitle(f"Comparison of Performance Metrics for {method}", fontsize=16, fontweight='bold')
+plt.tight_layout()
+
+# 비교하고자 하는 특정 Cell Name
+cell_name = "Cell 1"
+
+# Cell Name에 따라 데이터 필터링
+cell_data = F_performance_df[F_performance_df["Cell Name"] == cell_name]
+
+# 2x3 서브플롯 생성 (마지막 subplot은 비어 있게 유지)
+fig, axes = plt.subplots(2, 3, figsize=(14, 8))
+
+# 각 성능 지표에 대해 반복
+for i, metric in enumerate(metrics):
+    row, col = divmod(i, 3)
+    ax = axes[row, col]
+
+    # 지표 데이터 생성 (Case를 x축으로 사용)
+    metric_data = cell_data[["Case", metric]]
+
+    # 막대 그래프 그리기
+    sns.barplot(
+        x="Case",
+        y=metric,
+        data=metric_data,
+        ax=ax,
+        palette=sns.color_palette("Set2", len(metric_data["Case"].unique())),
+        edgecolor='black'
+    )
+
+    # 서브플롯 제목 및 레이블 설정
+    ax.set_title(metric, fontsize=12, fontweight='bold')
+    ax.set_ylabel(metric, fontsize=10, fontweight='bold')
+    ax.set_xlabel("Fixed Models", fontsize=10, fontweight='bold')
+    ax.grid(True, linestyle='--', alpha=0.7)
+
+# 빈 서브플롯 숨기기
+if len(metrics) < 6:
+    for j in range(len(metrics), 6):
+        row, col = divmod(j, 3)
+        axes[row, col].axis("off")
+
+# 전체 제목 설정
+plt.suptitle(f"Performance Metrics Comparison for {cell_name}", fontsize=16, fontweight='bold')
+plt.tight_layout()
+
+
+
+
+
+
+
+# 데이터셋 분리 함수
+def separate_cases(df, cell_name):
+    train_df = df[df['Cell_Name'] != cell_name].copy().reset_index(drop=True)
+    test_df = df[df['Cell_Name'] == cell_name].copy().reset_index(drop=True)
+    return train_df, test_df
+
+
+# 성능 지표 계산 함수
+def calculate_performance_metrics(y_true, y_pred, y_std):
     max_absolute_error = np.max(np.abs(y_true - y_pred) / np.abs(y_true)) * 100
     mean_absolute_error_perc = mean_absolute_error(y_true, y_pred) / np.mean(np.abs(y_true)) * 100
     rmse = np.sqrt(mean_squared_error(y_true, y_pred)) / np.mean(np.abs(y_true)) * 100
-    lower_bound = y_pred - 1.96 * y_std  # 신뢰 구간을 좁게 설정
+    lower_bound = y_pred - 1.96 * y_std
     upper_bound = y_pred + 1.96 * y_std
     coverage = np.mean((y_true >= lower_bound) & (y_true <= upper_bound)) * 100
     mean_std_dev = np.mean(y_std) / np.mean(np.abs(y_true)) * 100
 
-    return {'Maximum Absolute Error (%)': max_absolute_error,
-            'Mean Absolute Error (%)': mean_absolute_error_perc,
-            'Root Mean Square Error (%)': rmse,
-            'Coverage Probability (%)': coverage,
-            'Mean Standard Deviation (%)': mean_std_dev}
+    return {
+        'Maximum Absolute Error (%)': max_absolute_error,
+        'Mean Absolute Error (%)': mean_absolute_error_perc,
+        'Root Mean Square Error (%)': rmse,
+        'Coverage Probability (%)': coverage,
+        'Mean Standard Deviation (%)': mean_std_dev
+    }
 
 
-# GPR 모델 학습 및 예측 함수 (커널 파라미터 조정)
-def train_and_predict_gpr_F(train_x, train_y, test_x):
-    scaler = StandardScaler()
-    train_x_scaled = scaler.fit_transform(train_x)
-    test_x_scaled = scaler.transform(test_x)
-    kernel = C(1.0, (1e-3, 1e2)) * Matern(length_scale=0.5, length_scale_bounds=(1e-2, 1), nu=1.5) + WhiteKernel(noise_level=1e-2, noise_level_bounds=(1e-4, 1e-1))
-    gpr = GaussianProcessRegressor(kernel=kernel, n_restarts_optimizer=20, alpha=0.01)
-    gpr.fit(train_x_scaled, train_y)
-    y_pred, y_std = gpr.predict(test_x_scaled, return_std=True)
-    return y_pred, y_std
+# GPR 모델 정의
+def create_gpr_pipeline():
+    kernel = (
+            C(1.0, (1e-3, 1e4)) *
+            Matern(length_scale=1.0, length_scale_bounds=(1e-2, 1e2), nu=1.5) +
+            WhiteKernel(noise_level=1e-3, noise_level_bounds=(1e-6, 1e1))
+    )
+    pipeline = Pipeline([
+        ('scaler', StandardScaler()),  # 스케일링
+        ('gpr', GaussianProcessRegressor(kernel=kernel, n_restarts_optimizer=20, alpha=0.1))
+    ])
+    return pipeline
 
 
-# 성능 지표 저장할 리스트 초기화
-F_performance_metrics = {}
+# 데이터셋 준비
+fixed_hold_out = {num: {"train": {}, "test": {}} for num in range(len(fixed_case_df))}
+for num, case_key in enumerate(fixed_case_df.keys()):
+    for i in range(1, 5):
+        train_df, test_df = separate_cases(fixed_case_df[case_key], f'Cell_{i}')
+        fixed_hold_out[num]["train"][f'case{i}_train_df'] = train_df
+        fixed_hold_out[num]["test"][f'case{i}_test_df'] = test_df
 
-# 예측 결과를 저장할 개별 리스트 초기화
-all_actuals, all_predictions, all_std_devs = ([], [],[])
+# 성능 지표 저장 및 모델 학습
+F_performance_metrics = []
 
-# 반복적으로 각 케이스 학습 및 평가 수행
 for num in fixed_hold_out.keys():
     F_train_list = list(fixed_hold_out[num]["train"].keys())
     F_test_list = list(fixed_hold_out[num]["test"].keys())
-    case_actuals, case_predictions, case_std_devs = [], [], []
-    dummy = []
+
     for i in range(len(F_train_list)):
         train_x_raw = fixed_hold_out[num]["train"][F_train_list[i]].drop(columns=["Cell_Name", "Cycle"]).values
         train_y_raw = fixed_hold_out[num]["train"][F_train_list[i]]["SoH"].values
         test_x_raw = fixed_hold_out[num]["test"][F_test_list[i]].drop(columns=["Cell_Name", "Cycle"]).values
         test_y_raw = fixed_hold_out[num]["test"][F_test_list[i]]["SoH"].values
 
-        # 모델 예측 및 성능 평가
-        y_pred, y_std = train_and_predict_gpr_F(train_x_raw, train_y_raw, test_x_raw)
+        # Pipeline으로 GPR 모델 학습 및 예측
+        pipeline = create_gpr_pipeline()
+        pipeline.fit(train_x_raw, train_y_raw)
+        y_pred, y_std = pipeline.predict(test_x_raw, return_std=True)
+
+        # 성능 지표 계산
         metrics = calculate_performance_metrics(test_y_raw, y_pred, y_std)
-        dummy.append((metrics))
+        F_performance_metrics.append(metrics)
 
-        case_actuals.append(list(test_y_raw))
-        case_predictions.append(list(y_pred))
-        case_std_devs.append(list(y_std))
+        from sklearn.model_selection import cross_val_score
+        kernel = C(1.0, (1e-3, 1e4)) * Matern(length_scale=1.0, nu=1.5) + WhiteKernel(noise_level=1e-3)
+        gpr = GaussianProcessRegressor(kernel=kernel, n_restarts_optimizer=20, alpha=1)
+        scores = cross_val_score(gpr, train_x_raw, train_y_raw, cv=5, scoring="neg_mean_squared_error")
+        print("Cross-Validation Scores:", -scores)
 
-    F_performance_metrics[num] = dummy
-    all_actuals.append(case_actuals)
-    all_predictions.append(case_predictions)
-    all_std_devs.append(case_std_devs)
-
-# 성능 평가 결과를 데이터프레임으로 변환
-F_performance_df = pd.DataFrame([F_performance_metrics])
-
-mergy_per_df = []
-
-
-
-
-
-# Seaborn 스타일 설정
-sns.set(style="darkgrid")
-# 색상 리스트 정의 (각 데이터 요소에 대해 일관된 색상 사용)
-colors = sns.color_palette("Spectral", 3)
-# actual_color , predicted_color , confidence_color  = colors[0], colors[1], colors[2]
-actual_color = '#E74C3C'        # 실제값 색상 (눈에 편안한 주황색 계열)
-predicted_color = '#2E86C1'     # 예측값 색상 (진한 파란색 계열)
-confidence_color = '#808080'    # 신뢰 구간 색상 (연한 회색 계열)
-# Cycle, Actual SoH, Predicted SoH, 및 신뢰 구간 계산
-for num in range(len(fixed_hold_out)):
-    plt.figure(figsize=(12, 8))
-    for n in range(len(F_train_list)):
-        plt.subplot(2, 2, n + 1)
-        x = fixed_hold_out[num]["test"][F_test_list[n]]["Cycle"].values
-        actual_soh = fixed_hold_out[num]["test"][F_test_list[n]]["SoH"].values
-        predicted_soh = all_predictions[num][n]
-        std_dev = all_std_devs[num][n]
-
-        # 95% 신뢰 구간 계산
-        lower_bound = np.array(predicted_soh) - 1.96 * np.array(std_dev)
-        upper_bound = np.array(predicted_soh) + 1.96 * np.array(std_dev)
-
-        # 그래프 그리기
-        plt.plot(x, actual_soh, '*', color=actual_color, markersize=7, label='Actual SoH')  # 실제값 색상
-        plt.plot(x, predicted_soh, '-', color=predicted_color, linewidth=3, label='Predicted SoH')  # 예측값 색상
-        plt.fill_between(x, lower_bound, upper_bound, color=confidence_color, alpha=0.3, label='95% Confidence Interval')  # 신뢰 구간 색상
-
-        # 서브플롯마다 제목 및 설정 추가
-        plt.xlabel("Cycle", fontsize=12, fontweight='bold')
-        plt.ylabel("SoH (%)", fontsize=12, fontweight='bold')
-        plt.title(f"SoH Prediction - Cell {n+1}", fontsize=14, fontweight='bold')
-        plt.legend(loc="upper right", fontsize="small")
-
-    # 전체 레이아웃 및 제목 설정
-    plt.suptitle(f"Fixed_x{num+1} SoH Prediction for Each Cell", fontsize=16, fontweight='bold')
-    plt.tight_layout()
+# 성능 결과를 데이터프레임으로 변환
+F_performance_df = pd.DataFrame(F_performance_metrics)
 
 
 
@@ -490,65 +807,462 @@ for num in range(len(fixed_hold_out)):
 
 
 
-# Seaborn 스타일 설정
-sns.set(style="darkgrid")
-# 색상 리스트 정의 (각 데이터 요소에 대해 일관된 색상 사용)
-colors = sns.color_palette("Spectral", 3)
-# actual_color , predicted_color , confidence_color  = colors[0], colors[1], colors[2]
-actual_color = '#E74C3C'        # 실제값 색상 (눈에 편안한 주황색 계열)
-predicted_color = '#2E86C1'     # 예측값 색상 (진한 파란색 계열)
-confidence_color = '#808080'    # 신뢰 구간 색상 (연한 회색 계열)
-# Cycle, Actual SoH, Predicted SoH, 및 신뢰 구간 계산
-for num in range(len(fixed_hold_out)):
-    plt.figure(figsize=(12, 8))
-    for n in range(len(F_train_list)):
-        plt.subplot(2, 2, n + 1)
-        x = fixed_hold_out[num]["test"][F_test_list[n]]["Cycle"].values
-        actual_soh = fixed_hold_out[num]["test"][F_test_list[n]]["SoH"].values
-        predicted_soh = all_predictions[num][n]
-        std_dev = all_std_devs[num][n]
-
-        # 95% 신뢰 구간 계산
-        lower_bound = np.array(predicted_soh) - 1.96 * np.array(std_dev)
-        upper_bound = np.array(predicted_soh) + 1.96 * np.array(std_dev)
-
-        # 그래프 그리기
-        plt.plot(x, actual_soh, '*', color=actual_color, markersize=7, label='Actual SoH')  # 실제값 색상
-        plt.plot(x, predicted_soh, '-', color=predicted_color, linewidth=3, label='Predicted SoH')  # 예측값 색상
-        plt.fill_between(x, lower_bound, upper_bound, color=confidence_color, alpha=0.3, label='95% Confidence Interval')  # 신뢰 구간 색상
-
-        # 서브플롯마다 제목 및 설정 추가
-        plt.xlabel("Cycle", fontsize=12, fontweight='bold')
-        plt.ylabel("SoH (%)", fontsize=12, fontweight='bold')
-        plt.title(f"SoH Prediction - Cell {n+1}", fontsize=14, fontweight='bold')
-        plt.legend(loc="upper right", fontsize="small")
-
-    # 전체 레이아웃 및 제목 설정
-    plt.suptitle(f"Fixed_x_{num} SoH Prediction for Each Cell", fontsize=16, fontweight='bold')
-    plt.tight_layout()
 
 
-# 성능 지표 목록
-metrics = ["Maximum Absolute Error (%)", "Mean Absolute Error (%)",
-           "Root Mean Square Error (%)", "Coverage Probability (%)",
-           "Mean Standard Deviation (%)"]
-# Seaborn 팔레트를 사용하여 Case별 색상 정의
-colors = sns.color_palette("Set2", len(F_performance_df["Cell Name"]))
-# 2x3 서브플롯 생성 (빈 자리 하나 포함)
-fig, axes = plt.subplots(2, 3, figsize=(14, 8))
-# 각 성능 지표마다 막대 그래프 그리기
-for i, metric in enumerate(metrics):
-    row, col = divmod(i, 3)  # 2x3 배열의 행과 열 계산
-    # 각 Case에 대해 동일한 색상으로 막대 그래프 생성
-    axes[row, col].bar(F_performance_df["Cell Name"], F_performance_df[metric], color=colors, edgecolor='black')
-    axes[row, col].set_title(metric, fontsize=12, fontweight='bold')
-    axes[row, col].set_ylabel(metric, fontsize=10, fontweight='bold')
-    axes[row, col].grid(True, linestyle='--', alpha=0.7)
-# 빈 서브플롯 숨기기
-axes[1, 2].axis("off")
-# X축 레이블 설정
-for ax in axes[1, :2]:  # 마지막 행의 첫 두 축에만 x축 레이블 추가
-    ax.set_xlabel("Cell Name", fontsize=12, fontweight='bold')
-# 전체 레이아웃 설정
-plt.suptitle("Broadband Performance Metrics Comparison by Cell", fontsize=16, fontweight='bold')
+
+
+train_x_raw.shape
+
+
+
+''''''
+
+train_x_raw
+train_y_raw
+test_x_raw
+test_y_raw
+
+
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.preprocessing import StandardScaler
+from sklearn.gaussian_process import GaussianProcessRegressor
+from sklearn.gaussian_process.kernels import RBF, Matern, RationalQuadratic, ExpSineSquared
+import GPy
+import pyro
+import pyro.contrib.gp as gp
+import torch
+import pandas as pd
+from torch.optim import Adam
+import optuna
+
+input_demention = 6
+
+# Standardize training and testing datasets
+scaler = StandardScaler()
+train_x = scaler.fit_transform(train_x_raw)
+test_x = scaler.transform(test_x_raw)
+
+# Kernels for comparison
+kernels_sklearn = {
+    "RBF": RBF(length_scale=1.0),
+    "Matern (ν=1.5)": Matern(length_scale=1.0, nu=1.5),
+    "Matern (ν=2.5)": Matern(length_scale=1.0, nu=2.5),
+    "Rational Quadratic": RationalQuadratic(length_scale=1.0, alpha=1.0),}
+
+# Results storage
+results = {
+    "Scikit-learn": {},
+    "GPy": {},
+    "Pyro": {},
+    "GPyTorch" : {}
+}
+
+# Step 2: Scikit-learn Implementation
+for kernel_name, kernel in kernels_sklearn.items():
+    try:
+        gpr = GaussianProcessRegressor(kernel=kernel, alpha=0.1, random_state=42)
+        gpr.fit(train_x, train_y_raw)
+        y_pred, y_std = gpr.predict(test_x, return_std=True)
+        results["Scikit-learn"][kernel_name] = {
+            "model": gpr,
+            "y_pred": y_pred,
+            "y_std": y_std,
+            "log_marginal_likelihood": gpr.log_marginal_likelihood_value_
+        }
+    except Exception as e:
+        print(f"Scikit-learn - {kernel_name}: Error - {e}")
+
+# Step 3: GPy Implementation
+for kernel_name, kernel in kernels_sklearn.items():
+    try:
+        if "Matern" in kernel_name:
+            nu = 1.5 if "1.5" in kernel_name else 2.5
+            kernel_gpy = GPy.kern.Matern32(input_dim=input_demention) if nu == 1.5 else GPy.kern.Matern52(input_dim=input_demention)
+        elif kernel_name == "RBF":
+            kernel_gpy = GPy.kern.RBF(input_dim=input_demention)
+        elif kernel_name == "Rational Quadratic":
+            kernel_gpy = GPy.kern.RatQuad(input_dim=input_demention)
+        elif kernel_name == "Periodic":
+            kernel_gpy = GPy.kern.PeriodicExponential(input_dim=input_demention)
+        else:
+            continue
+
+        model = GPy.models.GPRegression(train_x, train_y_raw.reshape(-1, 1), kernel_gpy)
+        model.optimize(messages=False)
+        y_pred, y_var = model.predict(test_x)
+        results["GPy"][kernel_name] = {
+            "model": model,
+            "y_pred": y_pred.ravel(),
+            "y_std": np.sqrt(y_var.ravel()),
+            "log_marginal_likelihood": model.log_likelihood()
+        }
+    except Exception as e:
+        print(f"GPy - {kernel_name}: Error - {e}")
+
+# Step 4: Pyro Implementation
+train_x_torch = torch.tensor(train_x, dtype=torch.float32)
+train_y_torch = torch.tensor(train_y_raw, dtype=torch.float32)
+test_x_torch = torch.tensor(test_x, dtype=torch.float32)
+
+for kernel_name, kernel in kernels_sklearn.items():
+    try:
+        if kernel_name == "RBF":
+            kernel_pyro = gp.kernels.RBF(input_dim=input_demention)
+        elif kernel_name.startswith("Matern"):
+            kernel_pyro = gp.kernels.Matern32(input_dim=input_demention) if "1.5" in kernel_name else gp.kernels.Matern52(input_dim=input_demention)
+        elif kernel_name == "Rational Quadratic":
+            kernel_pyro = gp.kernels.RationalQuadratic(input_dim=input_demention)
+        elif kernel_name == "Periodic":
+            kernel_pyro = gp.kernels.Periodic(input_dim=input_demention)
+        else:
+            continue
+
+        # Create GPRegression model
+        gpr_pyro = gp.models.GPRegression(train_x_torch, train_y_torch, kernel_pyro, noise=torch.tensor(0.1))
+
+        # Define the optimizer
+        optimizer = Adam(gpr_pyro.parameters(), lr=0.01)
+
+        # Define the loss function
+        loss_fn = pyro.infer.Trace_ELBO().differentiable_loss
+
+        # Optimization loop
+        num_steps = 100
+        for step in range(num_steps):
+            optimizer.zero_grad()
+            loss = loss_fn(gpr_pyro.model, gpr_pyro.guide)
+            loss.backward()
+            optimizer.step()
+
+        # Make predictions
+        mean, var = gpr_pyro(test_x_torch, full_cov=False, noiseless=False)
+        results["Pyro"][kernel_name] = {
+            "model": gpr_pyro,
+            "y_pred": mean.detach().numpy(),
+            "y_std": torch.sqrt(var).detach().numpy(),
+            "log_marginal_likelihood": -loss.item()
+        }
+        print(f"Pyro - {kernel_name}: Training complete, Log Marginal Likelihood = {-loss.item():.3f}")
+
+    except Exception as e:
+        print(f"Pyro - {kernel_name}: Error - {e}")
+
+
+# Step 5: GPyTorch Implementation
+# GPyTorch Implementation
+
+# GPyTorch 커널 매핑 함수
+def get_gpytorch_kernel(kernel_name):
+    if kernel_name == "RBF":
+        return gpytorch.kernels.RBFKernel()
+    elif kernel_name == "Matern (ν=1.5)":
+        return gpytorch.kernels.MaternKernel(nu=1.5)
+    elif kernel_name == "Matern (ν=2.5)":
+        return gpytorch.kernels.MaternKernel(nu=2.5)
+    elif kernel_name == "Rational Quadratic":
+        # Rational Quadratic 대체 (RBF + ScaleKernel 조합)
+        return gpytorch.kernels.ScaleKernel(base_kernel=gpytorch.kernels.RBFKernel())
+    else:
+        raise ValueError(f"Unsupported kernel: {kernel_name}")
+
+class ExactGPModel(gpytorch.models.ExactGP):
+    def __init__(self, train_x, train_y, likelihood):
+        super(ExactGPModel, self).__init__(train_x, train_y, likelihood)
+        self.mean_module = gpytorch.means.ConstantMean()
+        self.covar_module = None  # 커널은 이후에 설정
+
+    def set_kernel(self, kernel):
+        self.covar_module = kernel  # base_kernel 전달 완료
+
+    def forward(self, x):
+        mean_x = self.mean_module(x)
+        covar_x = self.covar_module(x)
+        return gpytorch.distributions.MultivariateNormal(mean_x, covar_x)
+
+
+# 데이터 변환
+train_x_torch = torch.tensor(train_x, dtype=torch.float32)
+train_y_torch = torch.tensor(train_y_raw, dtype=torch.float32)
+test_x_torch = torch.tensor(test_x, dtype=torch.float32)
+
+# GPyTorch 학습 및 예측
+for kernel_name, kernel in kernels_sklearn.items():
+    try:
+        # GPyTorch 커널 생성
+        gpytorch_kernel = get_gpytorch_kernel(kernel_name)
+
+        # 모델 및 likelihood 초기화
+        likelihood = gpytorch.likelihoods.GaussianLikelihood()
+        model = ExactGPModel(train_x_torch, train_y_torch, likelihood)
+        model.set_kernel(gpytorch_kernel)  # 커널 설정
+
+        # 학습
+        model.train()
+        likelihood.train()
+
+        optimizer = torch.optim.Adam([{'params': model.parameters()}], lr=0.1)
+        mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, model)
+
+        training_iterations = 50
+        for i in range(training_iterations):
+            optimizer.zero_grad()
+            output = model(train_x_torch)
+            loss = -mll(output, train_y_torch)
+            loss.backward()
+            optimizer.step()
+
+        # 예측
+        model.eval()
+        likelihood.eval()
+        with torch.no_grad(), gpytorch.settings.fast_pred_var():
+            predictions = likelihood(model(test_x_torch))
+            mean = predictions.mean
+            lower, upper = predictions.confidence_region()
+
+        # 결과 저장
+        results["GPyTorch"][kernel_name] = {
+            "model": model,
+            "y_pred": mean.numpy(),
+            "y_std": (upper - lower).numpy() / 2,
+            "log_marginal_likelihood": -loss.item()
+        }
+        print(f"GPyTorch - {kernel_name}: Training complete, Log Marginal Likelihood = {-loss.item():.3f}")
+
+    except Exception as e:
+        print(f"GPyTorch - {kernel_name}: Error - {e}")
+
+
+
+# Step 5: Visualization
+plt.figure(figsize=(20, 10))
+num_kernels = len(kernels_sklearn)
+num_models = len(results)
+
+for i, (model_name, model_results) in enumerate(results.items(), 1):
+    for j, (kernel_name, result) in enumerate(model_results.items(), 1):
+        plt.subplot(num_models, num_kernels, (i - 1) * num_kernels + j)
+        y_pred = result["y_pred"]
+        y_std = result["y_std"]
+        plt.plot(test_y_raw, label="True Values", color='black', alpha=0.6)
+        plt.plot(y_pred, label=f"{kernel_name} Predictions", alpha=0.8)
+        plt.fill_between(
+            range(len(test_y_raw)),
+            y_pred - 1.96 * y_std,
+            y_pred + 1.96 * y_std,
+            color='blue', alpha=0.2, label="95% Confidence Interval"
+        )
+        plt.title(f"{model_name}: {kernel_name}")
+        plt.legend(loc="upper right", fontsize=10)
 plt.tight_layout()
+
+
+# 성능 지표 계산 함수
+def calculate_metrics(y_true, y_pred, y_std, confidence_level=1.96):
+    """
+    성능 지표 계산:
+    - y_true: 실제값
+    - y_pred: 예측값
+    - y_std: 예측 표준편차
+    - confidence_level: 신뢰구간 (default=95%, z=1.96)
+    """
+    # 절대 오차
+    absolute_errors = np.abs(y_true - y_pred)
+    max_abs_error = np.max(absolute_errors)
+    mean_abs_error = mean_absolute_error(y_true, y_pred)
+    rmse = np.sqrt(mean_squared_error(y_true, y_pred))
+
+    # Coverage Probability 계산
+    lower_bound = y_pred - confidence_level * y_std
+    upper_bound = y_pred + confidence_level * y_std
+    coverage = np.mean((y_true >= lower_bound) & (y_true <= upper_bound)) * 100
+
+    # 평균 표준편차 계산
+    mean_std = np.mean(y_std)
+
+    # 결과 반환
+    return {
+        "Max Absolute Error (%)": (max_abs_error / np.mean(y_true)) * 100,
+        "Mean Absolute Error (%)": (mean_abs_error / np.mean(y_true)) * 100,
+        "Root Mean Square Error (%)": (rmse / np.mean(y_true)) * 100,
+        "Coverage Probability (%)": coverage,
+        "Mean Standard Deviation (%)": (mean_std / np.mean(y_true)) * 100,
+    }
+
+# 성능 지표 추가
+metrics_results = {}
+
+for model_name, model_results in results.items():
+    metrics_results[model_name] = {}
+    for kernel_name, result in model_results.items():
+        try:
+            # 예측값과 표준편차 가져오기
+            y_pred = result["y_pred"]
+            y_std = result["y_std"]
+
+            # 성능 지표 계산
+            metrics = calculate_metrics(test_y_raw, y_pred, y_std)
+            metrics_results[model_name][kernel_name] = metrics
+
+            # 출력 결과
+            print(f"{model_name} - {kernel_name} Metrics:")
+            for metric_name, value in metrics.items():
+                print(f"  {metric_name}: {value:.2f}")
+        except Exception as e:
+            print(f"Error calculating metrics for {model_name} - {kernel_name}: {e}")
+
+
+# Step 6: Log Marginal Likelihood Comparison
+print("\nLog-Marginal Likelihood Comparison:")
+for model_name, model_results in results.items():
+    print(f"\n{model_name}:")
+    for kernel_name, result in model_results.items():
+        print(f"  {kernel_name}: {result['log_marginal_likelihood']:.3f}")
+
+
+
+
+# Optimization of hyperparameter
+# Hyperparameter Optimization with Optuna
+def optimize_hyperparameters(train_x, train_y_raw, test_x, test_y_raw):
+    def objective(trial):
+        alpha = trial.suggest_loguniform("alpha", 1e-5, 1e-1)
+        length_scale = trial.suggest_uniform("length_scale", 0.1, 10.0)
+        nu = trial.suggest_categorical("nu", [1.5])
+
+        kernel = Matern(length_scale=length_scale, nu=nu)
+        gpr = GaussianProcessRegressor(kernel=kernel, alpha=alpha, random_state=42)
+        gpr.fit(train_x, train_y_raw)
+        y_pred, y_std = gpr.predict(test_x, return_std=True)
+
+        mse = mean_squared_error(test_y_raw, y_pred)
+        return mse
+
+    study = optuna.create_study(direction="minimize")
+    study.optimize(objective, n_trials=50)
+    return study.best_params
+
+# Unified GPR Method
+def train_and_predict(train_x, train_y, test_x, method, best_params):
+    alpha = best_params["alpha"]
+    length_scale = best_params["length_scale"]
+    nu = best_params["nu"]
+
+    # Scikit-learn
+    if method == "scikit-learn":
+        kernel = C(1.0, (1e-3, 1e4)) * Matern(length_scale=length_scale, nu=nu) + WhiteKernel(noise_level=1e-3)
+        model = GaussianProcessRegressor(kernel=kernel, alpha=alpha, random_state=42)
+        model.fit(train_x, train_y)
+        y_pred, y_std = model.predict(test_x, return_std=True)
+        return y_pred, y_std
+
+    # GPy
+    elif method == "gpy":
+        kernel = GPy.kern.Matern32(input_dim=train_x.shape[1], lengthscale=length_scale) if nu == 1.5 else GPy.kern.Matern52(input_dim=train_x.shape[1], lengthscale=length_scale)
+        model = GPy.models.GPRegression(train_x, train_y[:, None], kernel)
+        model.Gaussian_noise.variance = alpha
+        model.optimize(messages=False)
+        y_pred, y_var = model.predict(test_x)
+        return y_pred.ravel(), np.sqrt(y_var.ravel())
+
+    # Pyro
+    elif method == "pyro":
+        train_x_torch = torch.tensor(train_x, dtype=torch.float32)
+        train_y_torch = torch.tensor(train_y, dtype=torch.float32)
+        test_x_torch = torch.tensor(test_x, dtype=torch.float32)
+        kernel = gp.kernels.Matern32(input_dim=train_x.shape[1]) if nu == 1.5 else gp.kernels.Matern52(input_dim=train_x.shape[1])
+        model = gp.models.GPRegression(train_x_torch, train_y_torch, kernel, noise=torch.tensor(alpha))
+        optimizer = pyro.optim.Adam({"lr": 0.01})
+        # loss_fn = pyro.infer.Trace_ELBO().differentiable_loss
+        loss_fn = pyro.infer.Trace_ELBO()
+        svi = pyro.infer.SVI(model.model, model.guide, optimizer, loss=loss_fn)
+        for _ in range(100):  # Training iterations
+            # optimizer.zero_grad()
+            loss = svi.step()  # SVI에서 step 메서드를 사용하여 손실 계산 및 최적화 수행
+            # loss = loss_fn(model.model, model.guide)
+            # loss.backward()
+            # optimizer.step()
+        mean, var = model(test_x_torch, full_cov=False, noiseless=False)
+        return mean.detach().numpy(), torch.sqrt(var).detach().numpy()
+
+    # GPyTorch
+    elif method == "gpytorch":
+        class ExactGPModel(gpytorch.models.ExactGP):
+            def __init__(self, train_x, train_y, likelihood):
+                super(ExactGPModel, self).__init__(train_x, train_y, likelihood)
+                self.mean_module = gpytorch.means.ConstantMean()
+                self.covar_module = gpytorch.kernels.ScaleKernel(gpytorch.kernels.MaternKernel(nu=nu))
+            def forward(self, x):
+                mean_x = self.mean_module(x)
+                covar_x = self.covar_module(x)
+                return gpytorch.distributions.MultivariateNormal(mean_x, covar_x)
+
+        train_x_torch = torch.tensor(train_x, dtype=torch.float32)
+        train_y_torch = torch.tensor(train_y, dtype=torch.float32)
+        test_x_torch = torch.tensor(test_x, dtype=torch.float32)
+
+        likelihood = gpytorch.likelihoods.GaussianLikelihood()
+        model = ExactGPModel(train_x_torch, train_y_torch, likelihood)
+        model.covar_module.base_kernel.lengthscale = length_scale
+        likelihood.noise = alpha
+        model.train()
+        likelihood.train()
+        optimizer = torch.optim.Adam([{"params": model.parameters()}], lr=0.1)
+        mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, model)
+        for _ in range(50):  # Training iterations
+            optimizer.zero_grad()
+            output = model(train_x_torch)
+            loss = -mll(output, train_y_torch)
+            loss.backward()
+            optimizer.step()
+        model.eval()
+        likelihood.eval()
+        with torch.no_grad(), gpytorch.settings.fast_pred_var():
+            predictions = likelihood(model(test_x_torch))
+            mean = predictions.mean
+            lower, upper = predictions.confidence_region()
+        return mean.numpy(), (upper - lower).numpy() / 2
+
+# Example usage
+# best_params = optimize_hyperparameters()
+# for method in ["scikit-learn", "gpy", "pyro", "gpytorch"]:
+#     y_pred, y_std = train_and_predict(train_x, train_y, test_x, method, best_params)
+#     print(f"Method: {method}, Predicted: {y_pred}, Std Dev: {y_std}")
+
+
+# Initialize the list to store performance metrics for each method
+methods = ["scikit-learn", "gpy", "pyro", "gpytorch"]
+performance_metrics = {method: [] for method in methods}
+
+# Initialize prediction results storage
+all_actuals = {method: [] for method in methods}
+all_predictions = {method: [] for method in methods}
+all_std_devs = {method: [] for method in methods}
+
+# Perform model training and prediction for each method and each dataset
+# best_params = optimize_hyperparameters()  # Get optimized hyperparameters using Bayesian optimization
+
+for method in methods:
+    for i in range(len(B_train_list)):
+        train_x_raw = Broadband_cases["train"][B_train_list[i]].drop(columns=B_input_drop_col).values
+        train_y_raw = Broadband_cases["train"][B_train_list[i]]["SoH"].values
+        test_x_raw = Broadband_cases["test"][B_test_list[i]].drop(columns=B_input_drop_col).values
+        test_y_raw = Broadband_cases["test"][B_test_list[i]]["SoH"].values
+
+        # 하이퍼파라미터 최적화
+        best_params = optimize_hyperparameters(train_x_raw, train_y_raw, test_x_raw, test_y_raw)
+
+        # 4가지 방법으로 예측 수행
+        for method in ["scikit-learn", "gpy", "pyro", "gpytorch"]:
+            y_pred, y_std = train_and_predict(train_x_raw, train_y_raw, test_x_raw, method, best_params)
+            print(f"Method: {method}, Predicted: {y_pred}, Std Dev: {y_std}")
+
+# Convert performance metrics to DataFrames for each method
+performance_dfs = {method: pd.DataFrame(performance_metrics[method]) for method in methods}
+
+# Display performance metrics for all methods
+for method, df in performance_dfs.items():
+    print(f"Performance Metrics for {method}:")
+    print(df)
+
+
