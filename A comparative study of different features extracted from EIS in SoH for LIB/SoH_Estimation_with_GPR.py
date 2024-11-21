@@ -797,8 +797,6 @@ plt.tight_layout()  # 레이아웃 조정
 
 
 ''''''
-
-
 train_x_raw = Broadband_cases["train"][B_train_list[-1]].drop(columns=B_input_drop_col).values
 train_y_raw = Broadband_cases["train"][B_train_list[-1]]["SoH"].values
 test_x_raw = Broadband_cases["test"][B_test_list[-1]].drop(columns=B_input_drop_col).values
@@ -1074,17 +1072,7 @@ plt.tight_layout()
 
 
 
-
-
-
-
-
-
-
-
-
-
-# 2. Scikit-Learn 모델 학습 및 예측
+# 2. Paper에 맞게 setting
 import numpy as np
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_squared_error
