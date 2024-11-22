@@ -437,7 +437,8 @@ for method in Im_methode:
         metrics["Case"] = f"Cell {i + 1}"
         
         performance_metrics[method].append(metrics)
-        predicted_results[method].append({"Actual": test_y_raw.tolist(),
+        predicted_results[method].append({
+                                            "Actual": test_y_raw.tolist(),
                                             "Predicted": y_pred.tolist(),
                                             "Lower Bound": lower_bound.tolist(),
                                             "Upper Bound": upper_bound.tolist(),
